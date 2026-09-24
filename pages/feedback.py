@@ -4,6 +4,7 @@ from io import StringIO
 
 import pandas as pd
 import streamlit as st
+import csv
 
 st.set_page_config(page_title="Pricing - Feedback", page_icon="💬", layout="wide", initial_sidebar_state="expanded")
 
@@ -21,34 +22,73 @@ st.markdown(
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_FILE = BASE_DIR / "Master_Live.csv"
+DATA_FILE = BASE_DIR / "Lelang_Live.csv"
 FEEDBACK_FILE = BASE_DIR / "feedback.csv"
+
+# st.markdown("""
+# <style>
+# .block-container {padding-top: 1.6rem; padding-bottom: 3rem;}
+# [data-testid="stSidebar"] {border-right: 1px solid rgba(128, 128, 128, .28);} 
+# .page-title {font-size: 2rem; font-weight: 700; margin-bottom: .15rem;}
+# .page-subtitle {color: var(--text-color); opacity: .72; margin-bottom: 1.4rem;}
+# </style>
+# """, unsafe_allow_html=True)
+
+hide_streamlit_style = """
+    <style>
+        #header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        .st-emotion-cache-1wbqy5l.e19wr9s00 {display: none !important;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
-.block-container {padding-top: 1.6rem; padding-bottom: 3rem;}
-[data-testid="stSidebar"] {border-right: 1px solid rgba(128, 128, 128, .28);}
-.page-title {font-size: 2rem; font-weight: 700; margin-bottom: .15rem;}
-.page-subtitle {color: var(--text-color); opacity: .72; margin-bottom: 1.4rem;}
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+    max-width: 80%;}
+.page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: .15rem;
+    line-height: 1.25;}   
 </style>
 """, unsafe_allow_html=True)
-
 
 
 @st.cache_data(show_spinner=False)
 def load_data():
     if not DATA_FILE.exists():
-        raise FileNotFoundError("Master.csv tidak ditemukan pada folder utama aplikasi.")
-    def robust_read_csv(path):
+        raise FileNotFoundError("Lelang_Live.csv tidak ditemukan pada folder utama aplikasi.")
+
+    def robust_read_csv(path: Path) -> pd.DataFrame:
+        # Try to detect delimiter using a small sample, fall back to comma.
         try:
-            return pd.read_csv(path)
-        except UnicodeDecodeError:
+            with path.open("r", encoding="utf-8-sig", errors="replace") as f:
+                sample = f.read(4096)
+        except Exception:
+            with path.open("rb") as f:
+                sample = f.read(4096).decode("utf-8", errors="replace")
+
+        try:
+            delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            delim = ","
+
+        try:
+            return pd.read_csv(path, sep=delim, engine="python", encoding="utf-8-sig", on_bad_lines="skip")
+        except Exception:
             try:
-                return pd.read_csv(path, encoding="utf-8-sig", engine="python", on_bad_lines='skip')
+                return pd.read_csv(path, sep=delim, engine="c", encoding="utf-8-sig")
             except Exception:
-                with open(path, "rb") as f:
+                with path.open("rb") as f:
                     content = f.read().decode("utf-8", errors="replace")
-                return pd.read_csv(StringIO(content))
+                return pd.read_csv(StringIO(content), sep=delim)
 
     df = robust_read_csv(DATA_FILE)
     for col in ["Brand", "Model"]:
@@ -95,16 +135,23 @@ if submitted:
     try:
         if FEEDBACK_FILE.exists():
             # read feedback file robustly to avoid decode errors
-            def robust_read_csv(path):
+            def robust_read_csv(path: Path) -> pd.DataFrame:
                 try:
-                    return pd.read_csv(path)
-                except UnicodeDecodeError:
-                    try:
-                        return pd.read_csv(path, encoding="utf-8-sig", engine="python", on_bad_lines='skip')
-                    except Exception:
-                        with open(path, "rb") as f:
-                            content = f.read().decode("utf-8", errors="replace")
-                        return pd.read_csv(StringIO(content))
+                    with path.open("r", encoding="utf-8-sig", errors="replace") as f:
+                        sample = f.read(4096)
+                except Exception:
+                    with path.open("rb") as f:
+                        sample = f.read(4096).decode("utf-8", errors="replace")
+                try:
+                    delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+                except csv.Error:
+                    delim = ","
+                try:
+                    return pd.read_csv(path, sep=delim, engine="python", encoding="utf-8-sig", on_bad_lines="skip")
+                except Exception:
+                    with path.open("rb") as f:
+                        content = f.read().decode("utf-8", errors="replace")
+                    return pd.read_csv(StringIO(content), sep=delim)
 
             existing = robust_read_csv(FEEDBACK_FILE)
             row = pd.concat([existing, row], ignore_index=True)
@@ -116,16 +163,23 @@ if submitted:
 st.markdown("### Feedback Terbaru")
 if FEEDBACK_FILE.exists():
     try:
-        def robust_read_csv(path):
+        def robust_read_csv(path: Path) -> pd.DataFrame:
             try:
-                return pd.read_csv(path)
-            except UnicodeDecodeError:
-                try:
-                    return pd.read_csv(path, encoding="utf-8-sig", engine="python", on_bad_lines='skip')
-                except Exception:
-                    with open(path, "rb") as f:
-                        content = f.read().decode("utf-8", errors="replace")
-                    return pd.read_csv(StringIO(content))
+                with path.open("r", encoding="utf-8-sig", errors="replace") as f:
+                    sample = f.read(4096)
+            except Exception:
+                with path.open("rb") as f:
+                    sample = f.read(4096).decode("utf-8", errors="replace")
+            try:
+                delim = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+            except csv.Error:
+                delim = ","
+            try:
+                return pd.read_csv(path, sep=delim, engine="python", encoding="utf-8-sig", on_bad_lines="skip")
+            except Exception:
+                with path.open("rb") as f:
+                    content = f.read().decode("utf-8", errors="replace")
+                return pd.read_csv(StringIO(content), sep=delim)
 
         feedback_df = robust_read_csv(FEEDBACK_FILE)
         st.dataframe(

@@ -7,17 +7,44 @@ from logging.handlers import RotatingFileHandler
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import textwrap
 
 
 # =========================================================
 # PAGE CONFIG
 # =========================================================
 st.set_page_config(
-    page_title="Pricing - Engine Lelang",
+    page_title="Pricing - Engine Creset Lelang",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+hide_streamlit_style = """
+    <style>
+        #header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        .st-emotion-cache-1wbqy5l.e19wr9s00 {display: none !important;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+    max-width: 80%;} 
+.page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: .15rem;
+    line-height: 1.25;}    
+</style>
+""", unsafe_allow_html=True)
 
 st.markdown(
     """
@@ -32,42 +59,43 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 1.6rem;
-        padding-bottom: 3rem;
-    }
-    [data-testid="stSidebar"] {
-        border-right: 1px solid rgba(128, 128, 128, .28);
-    }
-    .page-title {
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: .15rem;
-        line-height: 1.25;
-    }
-    .page-subtitle {
-        color: var(--text-color);
-        opacity: .72;
-        margin-bottom: 1.4rem;
-    }
-    div[data-testid="stMetric"] {
-        border: 1px solid rgba(128, 128, 128, .28);
-        border-radius: 12px;
-        padding: .75rem .9rem;
-        background: var(--secondary-background-color);
-        color: var(--text-color);
-    }
-    div[data-testid="stMetric"] [data-testid="stMetricLabel"],
-    div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-        color: var(--text-color);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# st.markdown(
+#     """
+#     <style>
+#     .block-container {
+#         padding-top: 1.6rem;
+#         padding-bottom: 3rem;
+#     }
+#     [data-testid="stSidebar"] {
+#         border-right: 1px solid rgba(128, 128, 128, .28);
+#     }
+#     .page-title {
+#         font-size: 2rem;
+#         font-weight: 700;
+#         margin-bottom: .15rem;
+#         line-height: 1.25;
+#     }
+#     .page-subtitle {
+#         color: var(--text-color);
+#         opacity: .72;
+#         margin-bottom: 1.4rem;
+#     }
+#     div[data-testid="stMetric"] {
+#         border: 1px solid rgba(128, 128, 128, .28);
+#         border-radius: 12px;
+#         padding: .75rem .9rem;
+#         background: var(--secondary-background-color);
+#         color: var(--text-color);
+#     }
+#     div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+#     div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+#         color: var(--text-color);
+#     }
+    
+#     </style>
+#     """,
+#     unsafe_allow_html=True,
+# )
 
 
 # =========================================================
@@ -137,7 +165,7 @@ MASTER_REQUIRED_COLUMNS = list(MASTER_FILTER_COLUMNS.values()) + MASTER_PRICE_CO
 # =========================================================
 @st.cache_resource
 def get_filter_logger():
-    """Siapkan logger berotasi untuk aktivitas filter Engine Lelang."""
+    """Siapkan logger berotasi untuk aktivitas filter Engine Creset Lelang."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("engine_lelang.filter")
     logger.setLevel(logging.INFO)
@@ -310,6 +338,10 @@ def load_data(file_path: Path, file_version):
 
     if "SaleDate" in df.columns:
         df["SaleDate"] = pd.to_datetime(df["SaleDate"], errors="coerce")
+        valid_sale_dates = df["SaleDate"].dropna()
+        if not valid_sale_dates.empty:
+            cutoff_date = valid_sale_dates.max() - pd.DateOffset(months=4)
+            df = df[df["SaleDate"] >= cutoff_date].copy()
 
     # Hanya gunakan record dengan identitas kendaraan dan harga transaksi
     # lelang yang valid. Nilai kosong pada Brand_Norm/Model_Norm/Tipe sudah
@@ -553,6 +585,204 @@ def filter_master_by_selection(master, selection):
     return filtered_master.copy()
 
 
+def render_live_distribution_chart(filtered, matched_master):
+    """Tampilkan persebaran harga lelang live dan benchmark JBA/IBID dalam satu chart."""
+    auction = filtered[PRICE_COLUMN].dropna().astype(float)
+    auction = auction[auction > 0]
+
+    if auction.empty:
+        st.info("Data harga lelang belum tersedia untuk parameter yang dipilih.")
+        return
+
+    auction_index = auction.index
+    auction_df = filtered.loc[auction_index, [PRICE_COLUMN]].copy()
+    auction_df = auction_df.rename(columns={PRICE_COLUMN: "Harga"})
+    auction_df["Transaksi"] = range(1, len(auction_df) + 1)
+
+    if "grade_overrall_csis" in filtered.columns:
+        auction_df["Grade"] = normalized_grade(filtered.loc[auction_index, "grade_overrall_csis"]).fillna("-")
+    else:
+        auction_df["Grade"] = "-"
+
+    if "note_csis" in filtered.columns:
+        auction_df["Note"] = filtered.loc[auction_index, "note_csis"].astype("string").str.strip()
+        auction_df["Note"] = auction_df["Note"].replace("", pd.NA).fillna("-")
+        auction_df["Note"] = auction_df["Note"].apply(
+            lambda v: textwrap.fill(str(v), width=40).replace("\n", "<br>")
+        )
+    else:
+        auction_df["Note"] = "-"
+
+    benchmark_lines = []
+    auction_mean = float(auction.mean())
+    benchmark_lines.append({
+        "name": "Avg Apl. Lelang",
+        "value": auction_mean,
+        "color": "#ef4444",
+        "dash": "dash",
+    })
+
+    if not matched_master.empty:
+        jba_values = pd.to_numeric(matched_master["price_curr"], errors="coerce").dropna()
+        ibid_values = pd.to_numeric(matched_master["ibid_hp"], errors="coerce").dropna()
+
+        if not jba_values.empty:
+            benchmark_lines.append({
+                "name": "JBA Avg",
+                "value": float(jba_values.mean()),
+                "color": "#8b5cf6",
+                "dash": "dash",
+            })
+        if not ibid_values.empty:
+            benchmark_lines.append({
+                "name": "Ibid Benchmark",
+                "value": float(ibid_values.mean() * 1_000_000),
+                "color": "#10b981",
+                "dash": "dash",
+            })
+
+    fig = px.scatter(
+        auction_df,
+        x="Transaksi",
+        y="Harga",
+        title="Distribusi Harga Lelang",
+        labels={"Transaksi": "", "Harga": "Harga (Rp)"},
+        color_discrete_sequence=["#f59e0b"],
+        custom_data=["Grade", "Note"],
+    )
+
+    fig.update_traces(
+        mode="markers",
+        marker=dict(size=12, color="#f59e0b", line=dict(color="#d97706", width=2)),
+        hovertemplate=(
+            "<b>Transaksi %{x}</b><br>"
+            "Harga: Rp %{y:,.0f} jt<br>"
+            "Grade: %{customdata[0]}<br>"
+            "Catatan: %{customdata[1]}<extra></extra>"
+        ),
+    )
+
+    for benchmark in benchmark_lines:
+        fig.add_hline(
+            y=benchmark["value"],
+            line_dash=benchmark["dash"],
+            line_color=benchmark["color"],
+            line_width=2,
+            annotation_text=f"{benchmark['name']} ({compact_money(benchmark['value'])})",
+            annotation_position="right top",
+            annotation_font=dict(size=13, color=benchmark["color"]),
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        title=dict(text="Distribusi Harga Lelang", x=0.02, font=dict(size=28, family="Arial")),
+        xaxis_title=None,
+        yaxis_title="Harga (Rp)",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.06,
+            xanchor="left",
+            x=0,
+            font=dict(size=14),
+        ),
+        height=620,
+        margin=dict(l=70, r=30, t=60, b=60),
+        hovermode="closest",
+    )
+    fig.update_xaxes(showgrid=True)
+    fig.update_yaxes(showgrid=True)
+    fig.update_traces(showlegend=False)
+
+    st.caption("Setiap titik = 1 transaksi Aplikasi Lelang")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_balai_lelang_ranking_chart(filtered):
+    """Tampilkan top 10 balai lelang berdasarkan rata-rata harga lelang tertinggi."""
+    if "BalaiLelang" not in filtered.columns or PRICE_COLUMN not in filtered.columns:
+        st.info("Kolom BalaiLelang atau harga lelang tidak tersedia untuk ranking balai lelang.")
+        return
+
+    ranking_df = (
+        filtered[["BalaiLelang", PRICE_COLUMN]]
+        .dropna()
+        .copy()
+    )
+    ranking_df = ranking_df[ranking_df[PRICE_COLUMN] > 0]
+
+    if ranking_df.empty:
+        st.info("Data balai lelang belum tersedia untuk parameter yang dipilih.")
+        return
+
+    ranking_df["BalaiLelang"] = ranking_df["BalaiLelang"].astype("string").str.strip().replace("", pd.NA)
+    ranking_df = ranking_df.dropna(subset=["BalaiLelang"])
+
+    if ranking_df.empty:
+        st.info("Data balai lelang belum tersedia untuk parameter yang dipilih.")
+        return
+
+    ranking = (
+        ranking_df.groupby("BalaiLelang", as_index=False)
+        .agg(avg_hammer_price=(PRICE_COLUMN, "mean"))
+        .sort_values("avg_hammer_price", ascending=False)
+        .head(10)
+        .reset_index(drop=True)
+    )
+
+    ranking["avg_hammer_price"] = pd.to_numeric(ranking["avg_hammer_price"], errors="coerce")
+    ranking = ranking.dropna(subset=["avg_hammer_price"]).sort_values("avg_hammer_price", ascending=True)
+
+    if ranking.empty:
+        st.info("Tidak ada data cukup untuk ranking balai lelang.")
+        return
+
+    ranking["label"] = ranking["avg_hammer_price"].apply(compact_money)
+    ranking["BalaiLelang"] = ranking["BalaiLelang"].astype(str)
+    ranking["avg_hammer_price_jt"] = ranking["avg_hammer_price"] / 1_000_000
+
+    fig = px.bar(
+        ranking,
+        x="avg_hammer_price_jt",
+        y="BalaiLelang",
+        orientation="h",
+        text="label",
+        title="Ranking Balai Lelang",
+        color_discrete_sequence=["#4f9ef7"],
+    )
+
+    fig.update_traces(
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Avg Hammer Price: %{x:.0f} jt<extra></extra>",
+        cliponaxis=False,
+    )
+
+    max_value = ranking["avg_hammer_price_jt"].max()
+    tick_values = [0, max_value * 0.25, max_value * 0.5, max_value * 0.75, max_value] if max_value > 0 else [0]
+    tick_values = sorted(set(round(float(v), 2) for v in tick_values))
+    tick_text = [f"{value:.0f}jt" for value in tick_values]
+
+    fig.update_layout(
+        template="plotly_white",
+        title=dict(text="Ranking Balai Lelang", x=0.02, font=dict(size=28, family="Arial")),
+        xaxis_title="Hammer Price (jt)",
+        yaxis_title=None,
+        height=620,
+        margin=dict(l=30, r=20, t=60, b=40),
+        showlegend=False,
+    )
+    fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(
+        showgrid=True,
+        tickvals=tick_values,
+        ticktext=tick_text,
+    )
+    fig.update_yaxes(showgrid=True)
+
+    st.caption("Top 10 berdasarkan Avg Hammer Price")
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_jba_ibid_analysis(matched_master):
     """Tampilkan ringkasan dan visualisasi master JBA/IBID yang sudah cocok."""
     st.markdown("## Hasil Matching Data JBA/IBID")
@@ -677,9 +907,8 @@ def vehicle_filter_panel(dataframe):
     year_col = FILTER_COLUMNS["year"]
     cc_col = FILTER_COLUMNS["cc"]
     transmission_col = FILTER_COLUMNS["transmission"]
-    region_code_col = FILTER_COLUMNS["region_code"]
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
 
     with c1:
         brand = st.selectbox(
@@ -696,17 +925,19 @@ def vehicle_filter_panel(dataframe):
             ["Semua Model"] + sorted_text(d1[model_col]),
             format_func=title_label,
         )
-        
+
     d2 = d1 if model == "Semua Model" else d1[d1[model_col] == model]
-    
+
     with c3:
         type = st.selectbox(
             "Tipe",
             ["Semua Tipe"] + sorted_text(d2[type_col]),
             format_func=title_label,
-        )    
+        )
 
     d3 = d2 if type == "Semua Tipe" else d2[d2[type_col] == type]
+
+    c4, c5, c6 = st.columns(3)
 
     with c4:
         year = st.selectbox(
@@ -716,8 +947,6 @@ def vehicle_filter_panel(dataframe):
 
     d4 = d3 if year == "Semua Tahun" else d3[d3[year_col] == int(year)]
 
-    c4, c5, c6 = st.columns(3)
-
     cc_values = (
         d4[cc_col]
         .dropna()
@@ -726,7 +955,7 @@ def vehicle_filter_panel(dataframe):
         .tolist()
     )
 
-    with c4:
+    with c5:
         cc = st.selectbox(
             "CC",
             ["Semua CC"] + cc_values,
@@ -735,7 +964,7 @@ def vehicle_filter_panel(dataframe):
 
     d5 = d4 if cc == "Semua CC" else d4[d4[cc_col] == float(cc)]
 
-    with c5:
+    with c6:
         transmission = st.selectbox(
             "Transmisi",
             ["Semua Transmisi"] + sorted_text(d5[transmission_col]),
@@ -748,17 +977,7 @@ def vehicle_filter_panel(dataframe):
         else d5[d5[transmission_col] == transmission]
     )
 
-    with c6:
-        region_code = st.selectbox(
-            "KodeDaerah",
-            ["Semua KodeDaerah"] + sorted_text(d6[region_code_col]),
-        )
-
-    filtered = (
-        d6
-        if region_code == "Semua KodeDaerah"
-        else d6[d6[region_code_col] == region_code]
-    )
+    filtered = d6
 
     submitted = st.button("Terapkan Filter", type="primary")
     selection = {
@@ -768,7 +987,7 @@ def vehicle_filter_panel(dataframe):
         "year": year,
         "cc": cc,
         "transmission": transmission,
-        "region_code": region_code,
+        "region_code": "Semua KodeDaerah",
     }
     return filtered, selection, submitted
 
@@ -789,7 +1008,7 @@ except Exception as exc:
 # PAGE HEADER
 # =========================================================
 st.markdown(
-    '<div class="page-title">Engine Lelang</div>',
+    '<div class="page-title">Engine Creset Lelang</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -866,7 +1085,7 @@ st.success(
 )
 
 st.caption(
-    f"Engine lelang hanya sebagai alat bantu, sebaiknya decision tetap mempertimbangkan kilometer, "
+    f"Engine Creset lelang hanya sebagai alat bantu, sebaiknya decision tetap mempertimbangkan kilometer, "
     "grade kondisi, recency transaksi, dan lokasi/balai lelang."
 )
 
@@ -926,6 +1145,15 @@ if grade_column in filtered.columns:
             )
         )
         grade_summary["Contoh note"] = grade_summary["Grade"].map(grade_note_map).fillna("-")
+        # Wrap long notes so hover tooltip shows nicely with line breaks
+        def _wrap_note(n, width=80):
+            if pd.isna(n) or n == "-":
+                return n
+            s = str(n)
+            wrapped = textwrap.fill(s, width=width)
+            return wrapped.replace("\n", "<br>")
+
+        grade_summary["Contoh note"] = grade_summary["Contoh note"].apply(_wrap_note)
         grade_summary["Grade"] = pd.Categorical(
             grade_summary["Grade"], categories=grade_order, ordered=True
         )
@@ -958,6 +1186,7 @@ if grade_column in filtered.columns:
                 "Jumlah data: %{customdata[1]}<br>"
                 "Contoh note: %{customdata[2]}<extra></extra>"
             ),
+            hoverlabel=dict(align="left", namelength=0),
         )
         grade_fig.update_layout(
             xaxis_title="Grade kondisi",
@@ -1009,7 +1238,6 @@ detail_columns = [
     "Tahun",
     "CC_Norm",
     "Transmission_Norm",
-    "KodeDaerah",
     "saleprice",
     "SaleDate",
     "kilometer1",
@@ -1050,3 +1278,8 @@ st.dataframe(
 # JBA / IBID REFERENCE
 # =========================================================
 render_jba_ibid_analysis(matched_master)
+
+with st.expander("View Analysis", expanded=False):
+    render_live_distribution_chart(filtered, matched_master)
+    st.markdown("<br>", unsafe_allow_html=True)
+    render_balai_lelang_ranking_chart(filtered)

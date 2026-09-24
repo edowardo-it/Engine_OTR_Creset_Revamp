@@ -21,6 +21,33 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+hide_streamlit_style = """
+    <style>
+        #header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        .st-emotion-cache-1wbqy5l.e19wr9s00 {display: none !important;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 1.5rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+    max-width: 80%;}
+.page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: .15rem;
+    line-height: 1.25;}   
+</style>
+""", unsafe_allow_html=True)
+
+
 MASTER_DATA_FILE = Path(__file__).with_name("Master_Live.csv")
 AUCTION_DATA_FILE = Path(__file__).with_name("Lelang_Live.csv")
 PRICE_COLUMNS = {
@@ -38,25 +65,25 @@ UNIT_COLUMNS = {
     "Lelang": "units_lelang",
 }
 
-st.markdown("""
-<style>
-.block-container {padding-top: 1.6rem; padding-bottom: 3rem;}
-[data-testid="stSidebar"] {border-right: 1px solid rgba(128, 128, 128, .28);}
-.page-title {font-size: 2rem; font-weight: 700; margin-bottom: .15rem;}
-.page-subtitle {color: var(--text-color); opacity: .72; margin-bottom: 1.4rem;}
-div[data-testid="stMetric"] {
-    border: 1px solid rgba(128, 128, 128, .28);
-    border-radius: 12px;
-    padding: .75rem .9rem;
-    background: var(--secondary-background-color);
-    color: var(--text-color);
-}
-div[data-testid="stMetric"] [data-testid="stMetricLabel"],
-div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-    color: var(--text-color);
-}
-</style>
-""", unsafe_allow_html=True)
+# st.markdown("""
+# <style>
+# .block-container {padding-top: 1.6rem; padding-bottom: 3rem;}
+# [data-testid="stSidebar"] {border-right: 1px solid rgba(128, 128, 128, .28);} 
+# .page-title {font-size: 2rem; font-weight: 700; margin-bottom: .15rem;}
+# .page-subtitle {color: var(--text-color); opacity: .72; margin-bottom: 1.4rem;}
+# div[data-testid="stMetric"] {
+#     border: 1px solid rgba(128, 128, 128, .28);
+#     border-radius: 12px;
+#     padding: .75rem .9rem;
+#     background: var(--secondary-background-color);
+#     color: var(--text-color);
+# }
+# div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+# div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+#     color: var(--text-color);
+# }
+# </style>
+# """, unsafe_allow_html=True)
 
 
 
@@ -148,6 +175,14 @@ def load_auction_data() -> tuple[pd.DataFrame, int]:
 
     for col in ["Brand_Norm", "Model_Norm"]:
         df[col] = df[col].astype("string").str.strip().replace("", pd.NA)
+
+    if "SaleDate" in df.columns:
+        df["SaleDate"] = pd.to_datetime(df["SaleDate"], errors="coerce")
+        valid_sale_dates = df["SaleDate"].dropna()
+        if not valid_sale_dates.empty:
+            cutoff_date = valid_sale_dates.max() - pd.DateOffset(months=4)
+            df = df[df["SaleDate"] >= cutoff_date].copy()
+
     df["Tahun"] = pd.to_numeric(df["Tahun"], errors="coerce")
     return df, skipped_rows
 
@@ -206,7 +241,7 @@ def render_data_summary(
     chart_key: str,
 ) -> None:
     """Render KPI dan chart untuk satu sumber tanpa mencampur data sumber lain."""
-    st.markdown(f"### Ringkasan {source_name}")
+    st.markdown(f"### Summary {source_name}")
 
     kpi_1, kpi_2, kpi_3 = st.columns(3)
     kpi_1.metric(f"Total data {source_name}", format_number(len(dataframe)))
@@ -272,11 +307,11 @@ except Exception as exc:
     st.error(str(exc))
     st.stop()
 
-st.markdown('<div class="page-title">Beranda</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="page-subtitle">Ringkasan untuk masing-masing Engine OTR Used Car dan Engine Lelang.</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="page-title">Home</div>', unsafe_allow_html=True)
+# st.markdown(
+#     '<div class="page-subtitle">Ringkasan untuk Engine Lelang.</div>',
+#     unsafe_allow_html=True,
+# )
 
 # st.markdown("### Ringkasan Sumber Harga")
 # summary = price_summary(master_df)
@@ -287,20 +322,10 @@ st.markdown(
 #     display["Total Unit"] = display["Total Unit"].apply(format_number)
 #     st.dataframe(display, hide_index=True)
 
-render_data_summary(
-    master_df,
-    source_name="Engine OTR Used Car",
-    brand_column="Brand",
-    model_column="Model",
-    year_column="Year",
-    chart_key="master_live",
-)
-
-st.divider()
 
 render_data_summary(
     auction_df,
-    source_name="Engine Lelang",
+    source_name="Engine Creset Lelang",
     brand_column="Brand_Norm",
     model_column="Model_Norm",
     year_column="Tahun",
@@ -309,9 +334,9 @@ render_data_summary(
 
 if skipped_auction_rows > 0:
     st.warning(
-        f"{format_number(skipped_auction_rows)} baris Engine Lelang "
+        f"{format_number(skipped_auction_rows)} baris Engine Creset Lelang "
         "tidak dapat diparsing dan dilewati."
     )
 
 st.markdown("### Cara Menggunakan")
-st.info("Gunakan **Engine OTR Used Car** untuk benchmark harga pasar used car, **Engine Lelang** untuk rekomendasi harga lelang based on Data Aplikasi Lelang, IBID dan JBA. Menu **Feedback** untuk mencatat evaluasi pengguna.")
+st.info("Gunakan **Engine Creset Lelang** untuk rekomendasi harga lelang based on Data Aplikasi Lelang, IBID dan JBA. Menu **Feedback** untuk mencatat evaluasi pengguna.")
